@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Linq;
 using Microsoft.Azure.Documents;
 using Microsoft.Azure.Documents.Client;
@@ -15,13 +16,43 @@ namespace CosmosTest
         private static string _assetKey = "";
         private const string CosmosConnectionString = "";
         private const string CosmosPrimaryKey = "";
+
         static void Main(string[] args)
         {
-            client = new DocumentClient(new Uri(CosmosConnectionString), CosmosPrimaryKey);
-            var test1 = OneQueryMethod(_assetKey); // Seeing 15-20 second times
-            var test2 = TwoQueryMethod(_assetKey); // Seeing 5-12 second times
-            Console.Read();
+            ConnectionPolicy connectionPolicy = new ConnectionPolicy { ConnectionProtocol = Protocol.Tcp, ConnectionMode = ConnectionMode.Direct };
+
+            client = new DocumentClient(new Uri(CosmosConnectionString), CosmosPrimaryKey, connectionPolicy);
+
+            client.OpenAsync().Wait();
+
+            Stopwatch sw = new Stopwatch();
+            sw.Start();
+
+            Console.WriteLine("Starting test1...");
+
+            var test1 = OneQueryMethod(_assetKey); 
+
+            Console.WriteLine("Elapsed time(in sec) for test1 : {0}", sw.ElapsedMilliseconds / 1000);
+
+            sw.Restart();
+
+            Console.WriteLine("Starting test2...");
+
+            var test2 = TwoQueryMethod(_assetKey); 
+
+            Console.WriteLine("Elapsed time(in sec) for test2 : {0}", sw.ElapsedMilliseconds / 1000);
+
+            sw.Restart();
+
+            Console.WriteLine("Starting test3...");
+
+            var test3 = ThreeQueryMethod(_assetKey); 
+
+            Console.WriteLine("Elapsed time(in ms) for test3 : {0}", sw.ElapsedMilliseconds);
+
+            Console.ReadKey();
         }
+
         public static Dictionary<string, string> OneQueryMethod(string assetKey)
         {
             var queryOptions = new FeedOptions { MaxItemCount = -1, EnableCrossPartitionQuery = true };
@@ -63,6 +94,27 @@ namespace CosmosTest
 
             return JsonConvert.DeserializeObject<Dictionary<string, string>>(doc.ToString());
         }
+
+        public static Dictionary<string, string> ThreeQueryMethod(string assetKey)
+        {
+            var queryOptions = new FeedOptions { MaxItemCount = -1, PartitionKey = new PartitionKey(assetKey) };
+
+            var query = client.CreateDocumentQuery(UriFactory.CreateDocumentCollectionUri(_databaseId, _collectionId),
+                    queryOptions).OrderByDescending(x => x.Timestamp).Take(1);
+
+            Document doc = query.AsEnumerable().FirstOrDefault();
+
+            if (doc == null)
+            {
+                return new Dictionary<string, string>();
+            }
+
+            string iotHubData = doc.GetPropertyValue<object>("IoTHub")?.ToString();
+            doc.SetPropertyValue("IoTHub", iotHubData);
+
+            return JsonConvert.DeserializeObject<Dictionary<string, string>>(doc.ToString());
+        }
+
         private static Document GetLatestAssetData(IEnumerable<Document> assetDocuments)
         {
             Document latestAssetData = assetDocuments.First();
